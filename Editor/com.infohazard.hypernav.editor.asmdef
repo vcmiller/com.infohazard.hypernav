@@ -1,0 +1,18 @@
+{
+    "name": "com.infohazard.hypernav.editor",
+    "rootNamespace": "",
+    "references": [
+        "GUID:6cbd575c524c95b42b43d42bff51eaa1"
+    ],
+    "includePlatforms": [
+        "Editor"
+    ],
+    "excludePlatforms": [],
+    "allowUnsafeCode": false,
+    "overrideReferences": false,
+    "precompiledReferences": [],
+    "autoReferenced": true,
+    "defineConstraints": [],
+    "versionDefines": [],
+    "noEngineReferences": false
+}

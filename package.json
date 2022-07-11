@@ -1,0 +1,13 @@
+{
+  "name": "com.infohazard.hypernav",
+  "displayName": "HyperNav",
+  "version": "1.0.0",
+  "unity": "2021.3",
+  "description": "3D volume-based navigation system.",
+  "keywords": [],
+  "repository": {
+    "url": "https://github.com/vcmiller/com.infohazard.hypernav.git",
+    "type": "git",
+    "revision": "ef1bd531b680871f97a0a8aae37ace80448b6291"
+  }
+}

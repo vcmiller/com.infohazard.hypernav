@@ -1,18 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Numerics;
-using Doozy.Runtime.Colors.Models;
 using HyperNav.Runtime;
-using SBR;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
-using Quaternion = UnityEngine.Quaternion;
 using Random = UnityEngine.Random;
-using Vector2 = UnityEngine.Vector2;
-using Vector3 = UnityEngine.Vector3;
 
 namespace HyperNav.Editor {
     public struct Triangle : IEquatable<Triangle> {
@@ -784,7 +778,7 @@ namespace HyperNav.Editor {
                         if (MarchingCubesCavityTables.CubesWithInternalCavities[cube]) {
                             if (basinId > 100) {
                                 Vector3 debugPos = volume.transform.TransformPoint(volume.Bounds.min + (Vector3) pos * volume.VoxelSize);
-                                Util.DrawDebugBounds(new Bounds(debugPos + Vector3.one, Vector3.one), Color.green, 10);
+                                Utility.DrawDebugBounds(new Bounds(debugPos + Vector3.one, Vector3.one), Color.green, 10);
                             }
                             SplitRegionForInternalConcavity(voxelCounts, basins, basinId, ref regionCount, volume, pos);
                         }
@@ -814,7 +808,7 @@ namespace HyperNav.Editor {
                                 if (basinId > 100) {
                                     Vector3 debugPos = volume.transform.TransformPoint(volume.Bounds.min + (Vector3) selfPos * volume.VoxelSize);
                                     Vector3 debugPos2 = volume.transform.TransformPoint(volume.Bounds.min + (Vector3) neighborPos * volume.VoxelSize);
-                                    Util.DrawDebugBounds(new Bounds(debugPos + Vector3.one, Vector3.one), Color.green, 10);
+                                    Utility.DrawDebugBounds(new Bounds(debugPos + Vector3.one, Vector3.one), Color.green, 10);
                                     Debug.DrawLine(debugPos, debugPos2, Color.green, 10);
                                 }
                                 SplitRegionForNeighborConcavity(voxelCounts, basins, basinId, ref regionCount,
@@ -841,11 +835,11 @@ namespace HyperNav.Editor {
             Vector3Int xAxis = dirs[(dirIndex + 1) % dirs.Length];
             Vector3Int yAxis = dirs[(dirIndex + 2) % dirs.Length];
 
-            int vz = MathUtil.Dot(pos, zAxis);
+            int vz = Utility.Dot(pos, zAxis);
 
-            int voxelsVx = MathUtil.Dot(voxelCounts, xAxis);
-            int voxelsVy = MathUtil.Dot(voxelCounts, yAxis);
-            int voxelsVz = MathUtil.Dot(voxelCounts, zAxis);
+            int voxelsVx = Utility.Dot(voxelCounts, xAxis);
+            int voxelsVy = Utility.Dot(voxelCounts, yAxis);
+            int voxelsVz = Utility.Dot(voxelCounts, zAxis);
 
             int split1 = GetBrokenCubeCount(basins, basinId, vz + 1, xAxis, yAxis, zAxis,
                                             new Vector2Int(voxelsVx, voxelsVy));
@@ -903,6 +897,12 @@ namespace HyperNav.Editor {
                             new Vector3Int(voxelCounts.x, voxelCounts.y, voxelCounts.z),
                             ref regionCount, volume, pos + Vector3Int.one);
             }
+        }
+
+        private static HashSet<Vector3Int> GetContiguousIfSplit(int[,,] basins, int basinId, int vz,
+                                                                Vector3Int xAxis, Vector3Int yAxis, Vector3Int zAxis,
+                                                                Vector2Int axisLimits) {
+            return null;
         }
 
         private static void SplitRegion(int[,,] basins, int basinId, int startZ,
