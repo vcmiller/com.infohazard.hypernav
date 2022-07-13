@@ -16,7 +16,7 @@ namespace HyperNav.Editor {
         private static Color _handleColorDisabled = new Color(127f * 0.75f, 214f * 0.75f, 244f * 0.75f, 100f) / 255;
 
         private BoxBoundsHandle _boundsHandle = new BoxBoundsHandle();
-        private static bool _showVertexNumbers;
+        [SerializeField] private bool _showVertexNumbers;
         
         private bool EditingCollider => EditMode.editMode == EditMode.SceneViewEditMode.Collider && EditMode.IsOwner(this);
 
@@ -181,13 +181,24 @@ namespace HyperNav.Editor {
                 Camera cam = Camera.current;
                 if (volume.EditorOnlyPreviewMesh != null && cam != null) {
                     Vector3[] verts = volume.EditorOnlyPreviewMesh.vertices;
-                    for (int i = 0; i < volume.EditorOnlyPreviewMesh.subMeshCount; i++) {
-                        int[] indices = volume.EditorOnlyPreviewMesh.GetIndices(i);
-                        for (int j = 0; j < indices.Length; j++) {
-                            Vector3 v = volume.transform.TransformPoint(verts[indices[j]]);
+
+                    if (volume.VisualizationMode < HyperNavVisualizationMode.BasinTriangulation) {
+                        for (int i = 0; i < volume.EditorOnlyPreviewMesh.subMeshCount; i++) {
+                            int[] indices = volume.EditorOnlyPreviewMesh.GetIndices(i);
+                            for (int j = 0; j < indices.Length; j++) {
+                                Vector3 v = volume.transform.TransformPoint(verts[indices[j]]);
+
+                                if (Vector3.SqrMagnitude(v - cam.transform.position) < 4) {
+                                    Handles.Label(v, $"{i}: {indices[j]}");
+                                }
+                            }
+                        }
+                    } else {
+                        for (int i = 0; i < verts.Length; i++) {
+                            Vector3 v = volume.transform.TransformPoint(verts[i]);
 
                             if (Vector3.SqrMagnitude(v - cam.transform.position) < 4) {
-                                Handles.Label(v, $"{i}: {indices[j]}");
+                                Handles.Label(v, i.ToString());
                             }
                         }
                     }

@@ -1,11 +1,14 @@
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
+using System.Text;
 using HyperNav.Runtime;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
+using Debug = UnityEngine.Debug;
 using Random = UnityEngine.Random;
 
 namespace HyperNav.Editor {
@@ -79,6 +82,44 @@ namespace HyperNav.Editor {
             return _minVertex ^ _midVertex ^ _maxVertex;
         }
     }
+    
+    public struct Edge : IEquatable<Edge> {
+        public int Vertex1 { get; }
+        public int Vertex2 { get; }
+
+        private readonly int _minVertex;
+        private readonly int _maxVertex;
+
+        public Edge(int vertex1, int vertex2) {
+            Vertex1 = vertex1;
+            Vertex2 = vertex2;
+
+            if (vertex1 == vertex2) {
+                Debug.LogError($"Edge vertices must not be the same index: {vertex1}, {vertex2}.");
+            }
+
+            if (vertex1 > vertex2) {
+                _minVertex = vertex2;
+                _maxVertex = vertex1;
+            } else {
+                _minVertex = vertex1;
+                _maxVertex = vertex2;
+            }
+        }
+
+        public override bool Equals(object obj) {
+            if (!(obj is Edge edge)) return false;
+            return Equals(edge);
+        }
+
+        public bool Equals(Edge other) {
+            return _minVertex == other._minVertex && _maxVertex == other._maxVertex;
+        }
+
+        public override int GetHashCode() {
+            return _minVertex ^ _maxVertex;
+        }
+    }
 
     public struct MultiRegionMeshInfo {
         public List<Vector3> Vertices { get; set; }
@@ -136,53 +177,106 @@ namespace HyperNav.Editor {
 
         public static void BakeData(HyperNavVolume volume) {
             Vector3Int voxelCounts = Vector3Int.RoundToInt(volume.Bounds.size / volume.VoxelSize);
+
+            Stopwatch stopwatch = new Stopwatch();
+            StringBuilder sb = new StringBuilder();
+
+            void LogStopwatch(string label) {
+                sb.Append($"{label}: {stopwatch.ElapsedMilliseconds} ms{Environment.NewLine}");
+            }
             
+            stopwatch.Restart();
             int[,,] voxels = new int[voxelCounts.x,voxelCounts.y,voxelCounts.z];
             CalculateBlockedVoxels(volume, voxelCounts, voxels);
+            LogStopwatch("Calculate blocked voxels");
 
             if (volume.VisualizationMode == HyperNavVisualizationMode.Voxels) {
+                stopwatch.Restart();
                 BuildVoxelPreviewMesh(volume, voxels);
+                LogStopwatch("Build voxel preview mesh");
             }
 
+            stopwatch.Restart();
             CalculateVoxelDistance(voxelCounts, voxels);
-            BlurVoxelDistance(voxelCounts, ref voxels, volume.DistanceBlurRadius);
+            LogStopwatch("Calculate voxel distance");
+
+            if (volume.DistanceBlurRadius > 0) {
+                stopwatch.Restart();
+                BlurVoxelDistance(voxelCounts, ref voxels, volume.DistanceBlurRadius);
+                LogStopwatch("Blur voxel distance");
+            }
+            
+            stopwatch.Restart();
             int maxDist = GetMaxDist(voxelCounts, voxels);
+            LogStopwatch("Get max distance");
 
             if (volume.VisualizationMode == HyperNavVisualizationMode.VoxelDist) {
+                stopwatch.Restart();
                 BuildVoxelDistancePreviewMesh(volume, voxels, maxDist);
+                LogStopwatch("Build voxel distance preview mesh");
             }
             
-            int[,,] basins = CalculateBasins(voxelCounts, voxels, maxDist, out int basinCount);
+            stopwatch.Restart();
+            int[,,] basins = CalculateBasinsBasic(voxelCounts, voxels, maxDist, out int basinCount);
+            LogStopwatch("Calculate initial regions");
 
             if (volume.VisualizationMode == HyperNavVisualizationMode.BasinID) {
+                stopwatch.Restart();
                 BuildBasinIDPreviewMesh(volume, voxels, basins, basinCount, maxDist);
+                LogStopwatch("Build initial region preview mesh");
             }
-            
+
+            stopwatch.Restart();
             ConvexifyAllRegions(voxelCounts, basins, ref basinCount, volume);
+            LogStopwatch("Calculate convex regions");
 
             if (volume.VisualizationMode == HyperNavVisualizationMode.ConvexRegions) {
+                stopwatch.Restart();
                 BuildBasinIDPreviewMesh(volume, voxels, basins, basinCount, maxDist);
-            }
-
-            if (volume.VisualizationMode == HyperNavVisualizationMode.BasinEdge) {
-                int[,,] basinEdges = CalculateBasinEdges(voxelCounts, basins);
-                BuildBasinIDPreviewMesh(volume, voxels, basinEdges, basinCount, maxDist);
-            }
-
-            TriangulateBasins(voxelCounts, basins, out MultiRegionMeshInfo meshInfo, volume);
-
-            if (volume.VisualizationMode == HyperNavVisualizationMode.BasinTriangulation) {
-                BuildTriangulationPreviewMesh(volume, meshInfo.Vertices, meshInfo.RegionTriangleLists);
+                LogStopwatch("Build convex region preview mesh");
             }
             
+            stopwatch.Restart();
+            CombineRegionsWherePossible(voxelCounts, basins, ref basinCount, volume);
+            LogStopwatch("Combine regions");
+
+            if (volume.VisualizationMode == HyperNavVisualizationMode.CombinedRegions) {
+                stopwatch.Restart();
+                BuildBasinIDPreviewMesh(volume, voxels, basins, basinCount, maxDist);
+                LogStopwatch("Build combined region preview mesh");
+            }
+
+            if (volume.VisualizationMode == HyperNavVisualizationMode.RegionEdge) {
+                stopwatch.Restart();
+                int[,,] basinEdges = CalculateBasinEdges(voxelCounts, basins);
+                BuildBasinIDPreviewMesh(volume, voxels, basinEdges, basinCount, maxDist);
+                LogStopwatch("Build region edge preview mesh");
+            }
+
+            stopwatch.Restart();
+            TriangulateBasins(voxelCounts, basins, out MultiRegionMeshInfo meshInfo, volume);
+            LogStopwatch("Triangulate regions (marching cubes)");
+
+            if (volume.VisualizationMode == HyperNavVisualizationMode.BasinTriangulation) {
+                stopwatch.Restart();
+                BuildTriangulationPreviewMesh(volume, meshInfo.Vertices, meshInfo.RegionTriangleLists);
+                LogStopwatch("Build triangulated preview mesh");
+            }
+            
+            stopwatch.Restart();
             DecimateRegions(meshInfo, volume);
             foreach (var triangleList in meshInfo.RegionTriangleLists) {
                 triangleList.RemoveAll(i => i < 0);
             }
+            LogStopwatch("Decimate regions");
 
+            stopwatch.Restart();
             if (volume.VisualizationMode == HyperNavVisualizationMode.Decimation) {
                 BuildTriangulationPreviewMesh(volume, meshInfo.Vertices, meshInfo.RegionTriangleLists);
             }
+            LogStopwatch("Build decimated preview mesh");
+            
+            Debug.Log($"Time taken to bake volume:{Environment.NewLine}{sb}");
         }
 
         private static void DecimateRegions(MultiRegionMeshInfo meshInfo, HyperNavVolume volume) {
@@ -285,7 +379,8 @@ namespace HyperNav.Editor {
                                                                   lastVertex, region);
             if (vertexOrder == null) return false;
             if (vertexOrder.Count < 3) {
-                Debug.LogError("RemoveTrianglesAndGetEdgeRing returned vertex order with count < 3.");
+                DrawDebugVertexOrder(meshInfo, transform, vertexIndex, vertexOrder);
+                Debug.LogError($"RemoveTrianglesAndGetEdgeRing returned vertex order with count < 3 when removing {vertexIndex}.");
                 return false;
             }
 
@@ -319,8 +414,9 @@ namespace HyperNav.Editor {
                     }
                     
                     float dot = GetDotAndCrossProduct(meshInfo, curVertexIndex, prevVertexIndex, nextVertexIndex, out Vector3 cross);
-                    if (dot < -0.95) {
+                    if (dot < -0.99999) {
                         flatVertices.Add(curVertexIndex);
+                        continue;
                     }
 
                     float crossDot = Vector3.Dot(cross, normal);
@@ -455,17 +551,7 @@ namespace HyperNav.Editor {
                 }
 
                 if (!foundNext) {
-                    if (vertexOrder.Count > 0) {
-                        Debug.DrawLine(transform.TransformPoint(meshInfo.Vertices[vertexIndex]),
-                                       transform.TransformPoint(meshInfo.Vertices[vertexOrder[0]]),
-                                       Color.green, 10);
-                        for (int i = 0; i < vertexOrder.Count - 1; i++) {
-                            Debug.DrawLine(transform.TransformPoint(meshInfo.Vertices[vertexOrder[i]]),
-                                           transform.TransformPoint(meshInfo.Vertices[vertexOrder[i + 1]]),
-                                           Color.green, 10);
-                        }
-                    }
-                    
+                    DrawDebugVertexOrder(meshInfo, transform, vertexIndex, vertexOrder);
                     Debug.LogError($"Error finding next edge, vertex = {vertexIndex}, region = {region}");
                     return null;
                 }
@@ -654,14 +740,19 @@ namespace HyperNav.Editor {
 
         private static byte GetMarchingCubesIndex(Vector3Int voxelCounts, int[,,] basins, int basinID,
                                                   Vector3Int basePos) {
+            return GetMarchingCubesIndex(voxelCounts, pos => basins[pos.x, pos.y, pos.z] == basinID, basePos);
+        }
+
+        private static byte GetMarchingCubesIndex(Vector3Int voxelCounts, Func<Vector3Int, bool> filledFunc,
+                                                  Vector3Int basePos) {
             byte caseIndex = 0;
 
             for (int i = 0; i < MarchingCubesTables.Vertices.Length; i++) {
                 Vector3Int vertex = basePos + MarchingCubesTables.Vertices[i];
                 if (IsOutOfBounds(voxelCounts, vertex)) continue;
-                int vertexRegion = basins[vertex.x, vertex.y, vertex.z];
-                if (vertexRegion != basinID) continue;
-                caseIndex |= (byte)(1 << i);
+                if (filledFunc(vertex)) {
+                    caseIndex |= (byte)(1 << i);
+                }
             }
 
             return caseIndex;
@@ -758,6 +849,130 @@ namespace HyperNav.Editor {
             return false;
         }
 
+        private static void CombineRegionsWherePossible(Vector3Int voxelCounts, int[,,] basins, ref int regionCount,
+                                                        HyperNavVolume volume) {
+
+            bool combinedAnyRegion;
+            HashSet<int> goneRegions = new HashSet<int>();
+            HashSet<Edge> checkedPairs = new HashSet<Edge>();
+            do {
+                combinedAnyRegion = false;
+                
+                for (int regionId = 0; regionId < regionCount; regionId++) {
+                    if (goneRegions.Contains(regionId)) continue;
+                    HashSet<int> adjacent = GetRegionsAdjacentToRegion(voxelCounts, basins, regionId);
+                    foreach (int otherRegion in adjacent) {
+                        // We only need to check each pair of regions once.
+                        if (goneRegions.Contains(otherRegion) ||
+                            !checkedPairs.Add(new Edge(regionId, otherRegion))) continue;
+                        
+                        if (CanCombineRegions(voxelCounts, basins, regionId, otherRegion)) {
+                            goneRegions.Add(regionId);
+                            CombineRegions(voxelCounts, basins, regionId, otherRegion);
+                            combinedAnyRegion = true;
+                            
+                            // Region has changed so we need to recheck pairs containing it.
+                            checkedPairs.RemoveWhere(pair => 
+                                                         pair.Vertex1 == otherRegion || pair.Vertex2 == otherRegion);
+                        }
+                    }
+
+                    if (combinedAnyRegion) break;
+                }
+                
+            } while (combinedAnyRegion);
+            
+            Debug.Log($"Reduced region count by {goneRegions.Count}");
+        }
+
+        private static void CombineRegions(Vector3Int voxelCounts, int[,,] basins, int region1, int region2) {
+            for (int x = 0; x < voxelCounts.x; x++) {
+                for (int y = 0; y < voxelCounts.y; y++) {
+                    for (int z = 0; z < voxelCounts.z; z++) {
+                        if (basins[x, y, z] == region1) {
+                            basins[x, y, z] = region2;
+                        }
+                    }
+                }
+            }
+        }
+
+        private static bool CanCombineRegions(Vector3Int voxelCounts, int[,,] basins, int region1, int region2) {
+            bool Predicate(Vector3Int pos) {
+                int value = basins[pos.x, pos.y, pos.z];
+                return value == region1 || value == region2;
+            }
+            
+            for (int x = 0; x < voxelCounts.x - 1; x++) {
+                for (int y = 0; y < voxelCounts.y - 1; y++) {
+                    for (int z = 0; z < voxelCounts.z - 1; z++) {
+                        Vector3Int pos = new Vector3Int(x, y, z);
+                        byte cube = GetMarchingCubesIndex(voxelCounts, Predicate, pos);
+                        if (MarchingCubesCavityTables.CubesWithInternalCavities[cube]) {
+                            return false;
+                        }
+                    }
+                }
+            }
+            
+            // Look for cubes with neighbor concavities and split between them.
+            for (int dir = 0; dir < MarchingCubesTables.PositiveDirections.Length; dir++) {
+                Vector3Int dirVector = MarchingCubesTables.PositiveDirections[dir];
+                
+                for (int x = 0; x < voxelCounts.x - 1; x++) {
+                    for (int y = 0; y < voxelCounts.y - 1; y++) {
+                        for (int z = 0; z < voxelCounts.z - 1; z++) {
+                            Vector3Int selfPos = new Vector3Int(x, y, z);
+                            
+                            byte selfCube = GetMarchingCubesIndex(voxelCounts, Predicate, selfPos);
+                            if (selfCube == 0 || selfCube == 255) continue;
+
+                            int[] concaveNeighbors = MarchingCubesCavityTables.CubeConcaveNeighbors[selfCube][dir];
+                            if (concaveNeighbors.Length == 0) continue;
+                            
+                            Vector3Int neighborPos = selfPos + dirVector;
+                            if (IsOutOfBounds(voxelCounts, neighborPos + Vector3Int.one)) continue;
+                            
+                            byte neighborCube = GetMarchingCubesIndex(voxelCounts, Predicate, neighborPos);
+                            if (Array.IndexOf(concaveNeighbors, neighborCube) >= 0) {
+                                return false;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            return true;
+        }
+
+        private static HashSet<int> GetRegionsAdjacentToRegion(Vector3Int voxelCounts, int[,,] basins, int region) {
+
+            HashSet<int> adjacent = new HashSet<int>();
+            for (int x = 0; x < voxelCounts.x; x++) {
+                for (int y = 0; y < voxelCounts.y; y++) {
+                    for (int z = 0; z < voxelCounts.z; z++) {
+                        int curRegion = basins[x, y, z];
+                        if (adjacent.Contains(curRegion) || curRegion == region) continue;
+
+                        Vector3Int pos = new Vector3Int(x, y, z);
+                        foreach (Vector3Int dir in NeighborDirections) {
+                            Vector3Int n = pos + dir;
+                            if (IsOutOfBounds(voxelCounts, n)) continue;
+                            int nRegion = basins[n.x, n.y, n.z];
+                            if (nRegion == region) {
+                                adjacent.TryGetValue(curRegion, out int count);
+                                count++;
+                                adjacent.Add(curRegion);
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+
+            return adjacent;
+        }
+
         private static void ConvexifyAllRegions(Vector3Int voxelCounts, int[,,] basins, ref int regionCount, HyperNavVolume volume) {
             for (int i = 0; i < regionCount; i++) {
                 ConvexifyRegion(voxelCounts, basins, i, ref regionCount, volume);
@@ -796,6 +1011,7 @@ namespace HyperNav.Editor {
                             Vector3Int selfPos = new Vector3Int(x, y, z);
                             
                             byte selfCube = GetMarchingCubesIndex(voxelCounts, basins, basinId, selfPos);
+                            if (selfCube == 0 || selfCube == 255) continue;
 
                             int[] concaveNeighbors = MarchingCubesCavityTables.CubeConcaveNeighbors[selfCube][dir];
                             if (concaveNeighbors.Length == 0) continue;
@@ -853,7 +1069,7 @@ namespace HyperNav.Editor {
             } else {
                 SplitRegion(basins, basinId, vz + 2, xAxis, yAxis, zAxis,
                             new Vector3Int(voxelsVx, voxelsVy, voxelsVz),
-                            ref regionCount, volume, pos + Vector3Int.one);
+                            ref regionCount, volume, pos + Vector3Int.one + zAxis);
             }
         }
 
@@ -899,27 +1115,59 @@ namespace HyperNav.Editor {
             }
         }
 
-        private static HashSet<Vector3Int> GetContiguousIfSplit(int[,,] basins, int basinId, int vz,
-                                                                Vector3Int xAxis, Vector3Int yAxis, Vector3Int zAxis,
-                                                                Vector2Int axisLimits) {
-            return null;
+        private static HashSet<Vector3Int> GetContiguousIfSplit(Vector3Int voxelCounts, int[,,] basins, int basinId,
+                                                                Vector3Int start,
+                                                                Vector3Int xAxis, Vector3Int yAxis, Vector3Int zAxis) {
+
+            HashSet<Vector3Int> result = new HashSet<Vector3Int>();
+            Queue<Vector3Int> queue = new Queue<Vector3Int>();
+
+            int z = Utility.Dot(start, zAxis);
+            queue.Enqueue(start);
+            queue.Enqueue(start + xAxis);
+            queue.Enqueue(start + yAxis);
+            queue.Enqueue(start + xAxis + yAxis);
+            
+            while (queue.TryDequeue(out Vector3Int cur)) {
+                int cz = Utility.Dot(cur, zAxis);
+                if (!result.Add(cur) || IsOutOfBounds(voxelCounts, cur) || cz > z ||
+                    basins[cur.x, cur.y, cur.z] != basinId) {
+                    continue;
+                }
+                
+                foreach (Vector3Int dir in NeighborDirections) {
+                    Vector3Int n = cur + dir;
+                    queue.Enqueue(n);
+                }
+            }
+
+            return result;
         }
 
         private static void SplitRegion(int[,,] basins, int basinId, int startZ,
                                         Vector3Int xAxis, Vector3Int yAxis, Vector3Int zAxis,
                                         Vector3Int axisLimits, ref int regionCount,
-                                        HyperNavVolume volume, Vector3 startPos) {
+                                        HyperNavVolume volume, Vector3Int startPos) {
 
+            Vector3Int voxelCounts = new Vector3Int(
+                basins.GetLength(0), 
+                basins.GetLength(1), 
+                basins.GetLength(2));
+
+            HashSet<Vector3Int> contiguous =
+                GetContiguousIfSplit(voxelCounts, basins, basinId, startPos - Vector3Int.one, xAxis, yAxis, zAxis);
+            
             Vector3 normal = volume.transform.TransformDirection(zAxis);
-            Vector3 debugPos = volume.transform.TransformPoint(volume.Bounds.min + startPos * volume.VoxelSize);
-            Debug.DrawLine(debugPos, debugPos + normal, Color.cyan, 10);
+            Vector3 debugPos = volume.transform.TransformPoint(volume.Bounds.min + (Vector3)startPos * volume.VoxelSize);
+            //Debug.DrawLine(debugPos, debugPos + normal, Color.cyan, 10);
 
             int newRegion = regionCount++;
             for (int vx = 0; vx < axisLimits.x; vx++) {
                 for (int vy = 0; vy < axisLimits.y; vy++) {
-                    for (int vz = startZ; vz < axisLimits.z; vz++) {
+                    for (int vz = 0; vz < axisLimits.z; vz++) {
                         Vector3Int pos = xAxis * vx + yAxis * vy + zAxis * vz;
-                        if (basins[pos.x, pos.y, pos.z] == basinId) {
+                        bool split = vz >= startZ || !contiguous.Contains(pos);
+                        if (split && basins[pos.x, pos.y, pos.z] == basinId) {
                             basins[pos.x, pos.y, pos.z] = newRegion;
                         }
                     }
@@ -1014,6 +1262,33 @@ namespace HyperNav.Editor {
                 ExpandAllBasins(voxelCounts, waterLevel - 1, voxels, basins);
             }
 
+            return basins;
+        }
+
+        private static int[,,] CalculateBasinsBasic(Vector3Int voxelCounts, int[,,] voxels, int maxDist, out int basinCount) {
+            int[,,] basins = new int[voxelCounts.x, voxelCounts.y, voxelCounts.z];
+            for (int x = 0; x < voxelCounts.x; x++) {
+                for (int y = 0; y < voxelCounts.y; y++) {
+                    for (int z = 0; z < voxelCounts.z; z++) {
+                        basins[x, y, z] = -1;
+                    }
+                }
+            }
+
+            basinCount = 0;
+            
+            for (int x = 0; x < voxelCounts.x; x++) {
+                for (int y = 0; y < voxelCounts.y; y++) {
+                    for (int z = 0; z < voxelCounts.z; z++) {
+                        if (voxels[x, y, z] == 0) continue; // Voxel is blocked
+                        if (basins[x, y, z] >= 0) continue; // Basin is already set 
+
+                        basins[x, y, z] = basinCount++;
+                        ExpandBasin(voxelCounts, new Vector3Int(x, y, z), 1, voxels, basins);
+                    }
+                }
+            }
+            
             return basins;
         }
 
@@ -1126,9 +1401,7 @@ namespace HyperNav.Editor {
                 for (int i = 0; i < NeighborDirections.Length; i++) {
                     Vector3Int n = current + NeighborDirections[i];
 
-                    if (n.x < 0 || n.x >= voxelCounts.x ||
-                        n.y < 0 || n.y >= voxelCounts.y ||
-                        n.z < 0 || n.z >= voxelCounts.z) {
+                    if (IsOutOfBounds(voxelCounts, n)) {
                         continue;
                     }
 

@@ -64,6 +64,6 @@ namespace HyperNav.Runtime {
     }
         
     public enum HyperNavVisualizationMode {
-        None, Voxels, VoxelDist, BasinID, ConvexRegions, BasinEdge, BasinTriangulation, Decimation,
+        None, Voxels, VoxelDist, BasinID, ConvexRegions, CombinedRegions, RegionEdge, BasinTriangulation, Decimation,
     }
 }
