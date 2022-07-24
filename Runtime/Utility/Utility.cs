@@ -1,6 +1,6 @@
 using UnityEngine;
 
-namespace HyperNav.Runtime {
+namespace HyperNav.Runtime.Utility {
     public class Utility {
         public static int Dot(Vector3Int v1, Vector3Int v2) {
             return v1.x * v2.x + v1.y * v2.y + v1.z * v2.z;

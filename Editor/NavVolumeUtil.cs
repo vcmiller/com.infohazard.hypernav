@@ -4,6 +4,7 @@ using System.Diagnostics;
 using System.Linq;
 using System.Text;
 using HyperNav.Runtime;
+using HyperNav.Runtime.Utility;
 using UnityEditor;
 using UnityEngine;
 using UnityEngine.Rendering;
@@ -12,115 +13,6 @@ using Debug = UnityEngine.Debug;
 using Random = UnityEngine.Random;
 
 namespace HyperNav.Editor {
-    public struct Triangle : IEquatable<Triangle> {
-        public int Vertex1 { get; }
-        public int Vertex2 { get; }
-        public int Vertex3 { get; }
-
-        private readonly int _minVertex;
-        private readonly int _midVertex;
-        private readonly int _maxVertex;
-        
-        public Triangle(int vertex1, int vertex2, int vertex3) {
-            Vertex1 = vertex1;
-            Vertex2 = vertex2;
-            Vertex3 = vertex3;
-
-            if (vertex1 == vertex2 || vertex1 == vertex3 || vertex2 == vertex3) {
-                Debug.LogError($"Triangle vertices must not be the same index: {vertex1}, {vertex2}, {vertex3}.");
-            }
-
-            if (vertex1 > vertex2) {
-                // vertex 1 > vertex2
-                if (vertex3 > vertex1) {
-                    // vertex3 > vertex1 > vertex2
-                    _maxVertex = vertex3;
-                    _minVertex = vertex2;
-                    _midVertex = vertex1;
-                } else if (vertex2 > vertex3) {
-                    // vertex1 > vertex2 > vertex3
-                    _maxVertex = vertex1;
-                    _minVertex = vertex3;
-                    _midVertex = vertex2;
-                } else {
-                    // vertex1 > vertex3 > vertex2
-                    _maxVertex = vertex1;
-                    _minVertex = vertex2;
-                    _midVertex = vertex3;
-                }
-            } else {
-                // vertex2 > vertex1
-                if (vertex3 > vertex2) {
-                    // vertex3 > vertex2 > vertex1
-                    _maxVertex = vertex3;
-                    _minVertex = vertex1;
-                    _midVertex = vertex2;
-                } else if (vertex3 > vertex1) {
-                    // vertex2 > vertex3 > vertex1
-                    _maxVertex = vertex2;
-                    _minVertex = vertex1;
-                    _midVertex = vertex3;
-                } else {
-                    // vertex2 > vertex1 > vertex3
-                    _maxVertex = vertex2;
-                    _minVertex = vertex3;
-                    _midVertex = vertex1;
-                }
-            }
-        }
-
-        public override bool Equals(object obj) {
-            if (!(obj is Triangle triangle)) return false;
-            return Equals(triangle);
-        }
-
-        public bool Equals(Triangle other) {
-            return _minVertex == other._minVertex && _midVertex == other._midVertex && _maxVertex == other._maxVertex;
-        }
-
-        public override int GetHashCode() {
-            return _minVertex ^ _midVertex ^ _maxVertex;
-        }
-    }
-    
-    public struct Edge : IEquatable<Edge> {
-        public int Vertex1 { get; }
-        public int Vertex2 { get; }
-
-        private readonly int _minVertex;
-        private readonly int _maxVertex;
-
-        public Edge(int vertex1, int vertex2) {
-            Vertex1 = vertex1;
-            Vertex2 = vertex2;
-
-            if (vertex1 == vertex2) {
-                Debug.LogError($"Edge vertices must not be the same index: {vertex1}, {vertex2}.");
-            }
-
-            if (vertex1 > vertex2) {
-                _minVertex = vertex2;
-                _maxVertex = vertex1;
-            } else {
-                _minVertex = vertex1;
-                _maxVertex = vertex2;
-            }
-        }
-
-        public override bool Equals(object obj) {
-            if (!(obj is Edge edge)) return false;
-            return Equals(edge);
-        }
-
-        public bool Equals(Edge other) {
-            return _minVertex == other._minVertex && _maxVertex == other._maxVertex;
-        }
-
-        public override int GetHashCode() {
-            return _minVertex ^ _maxVertex;
-        }
-    }
-
     public struct MultiRegionMeshInfo {
         public List<Vector3> Vertices { get; set; }
         public List<List<int>> VertexConnections { get; set; }
@@ -139,7 +31,7 @@ namespace HyperNav.Editor {
         }
     }
     
-    public static class HyperNavVolumeUtil {
+    public static class NavVolumeUtil {
         private static Material _voxelPreviewMaterial;
         private static Material _voxelDistancePreviewMaterial;
         private static Material _basinIDPreviewMaterial;
@@ -151,13 +43,13 @@ namespace HyperNav.Editor {
             Vector3Int.up, Vector3Int.down, Vector3Int.forward, Vector3Int.back, Vector3Int.right, Vector3Int.left,
         };
         
-        public static HyperNavData GetOrCreateData(SerializedObject serializedObject) {
+        public static NavVolumeData GetOrCreateData(SerializedObject serializedObject) {
             SerializedProperty dataProp = serializedObject.FindProperty("_data");
             if (dataProp.objectReferenceValue) {
-                return (HyperNavData) dataProp.objectReferenceValue;
+                return (NavVolumeData) dataProp.objectReferenceValue;
             }
             
-            HyperNavData data = ScriptableObject.CreateInstance<HyperNavData>();
+            NavVolumeData data = ScriptableObject.CreateInstance<NavVolumeData>();
             dataProp.objectReferenceValue = data;
             
             string scenePath = SceneManager.GetActiveScene().path;
@@ -170,12 +62,12 @@ namespace HyperNav.Editor {
                 AssetDatabase.CreateFolder(parentFolder, folderName);
             }
 
-            string assetPath = scenePath + "/NavGrid_" + serializedObject.targetObject.GetInstanceID() + ".asset";
+            string assetPath = scenePath + "/HyperNavVolume_" + serializedObject.targetObject.GetInstanceID() + ".asset";
             AssetDatabase.CreateAsset(data, assetPath);
             return data;
         }
 
-        public static void BakeData(HyperNavVolume volume) {
+        public static void BakeData(NavVolume volume) {
             Vector3Int voxelCounts = Vector3Int.RoundToInt(volume.Bounds.size / volume.VoxelSize);
 
             Stopwatch stopwatch = new Stopwatch();
@@ -190,7 +82,7 @@ namespace HyperNav.Editor {
             CalculateBlockedVoxels(volume, voxelCounts, voxels);
             LogStopwatch("Calculate blocked voxels");
 
-            if (volume.VisualizationMode == HyperNavVisualizationMode.Voxels) {
+            if (volume.VisualizationMode == NavVolumeVisualizationMode.Voxels) {
                 stopwatch.Restart();
                 BuildVoxelPreviewMesh(volume, voxels);
                 LogStopwatch("Build voxel preview mesh");
@@ -210,7 +102,7 @@ namespace HyperNav.Editor {
             int maxDist = GetMaxDist(voxelCounts, voxels);
             LogStopwatch("Get max distance");
 
-            if (volume.VisualizationMode == HyperNavVisualizationMode.VoxelDist) {
+            if (volume.VisualizationMode == NavVolumeVisualizationMode.VoxelDist) {
                 stopwatch.Restart();
                 BuildVoxelDistancePreviewMesh(volume, voxels, maxDist);
                 LogStopwatch("Build voxel distance preview mesh");
@@ -220,7 +112,7 @@ namespace HyperNav.Editor {
             int[,,] basins = CalculateBasinsBasic(voxelCounts, voxels, maxDist, out int basinCount);
             LogStopwatch("Calculate initial regions");
 
-            if (volume.VisualizationMode == HyperNavVisualizationMode.BasinID) {
+            if (volume.VisualizationMode == NavVolumeVisualizationMode.BasinID) {
                 stopwatch.Restart();
                 BuildBasinIDPreviewMesh(volume, voxels, basins, basinCount, maxDist);
                 LogStopwatch("Build initial region preview mesh");
@@ -230,7 +122,7 @@ namespace HyperNav.Editor {
             ConvexifyAllRegions(voxelCounts, basins, ref basinCount, volume);
             LogStopwatch("Calculate convex regions");
 
-            if (volume.VisualizationMode == HyperNavVisualizationMode.ConvexRegions) {
+            if (volume.VisualizationMode == NavVolumeVisualizationMode.ConvexRegions) {
                 stopwatch.Restart();
                 BuildBasinIDPreviewMesh(volume, voxels, basins, basinCount, maxDist);
                 LogStopwatch("Build convex region preview mesh");
@@ -240,13 +132,13 @@ namespace HyperNav.Editor {
             CombineRegionsWherePossible(voxelCounts, basins, ref basinCount, volume);
             LogStopwatch("Combine regions");
 
-            if (volume.VisualizationMode == HyperNavVisualizationMode.CombinedRegions) {
+            if (volume.VisualizationMode == NavVolumeVisualizationMode.CombinedRegions) {
                 stopwatch.Restart();
                 BuildBasinIDPreviewMesh(volume, voxels, basins, basinCount, maxDist);
                 LogStopwatch("Build combined region preview mesh");
             }
 
-            if (volume.VisualizationMode == HyperNavVisualizationMode.RegionEdge) {
+            if (volume.VisualizationMode == NavVolumeVisualizationMode.RegionEdge) {
                 stopwatch.Restart();
                 int[,,] basinEdges = CalculateBasinEdges(voxelCounts, basins);
                 BuildBasinIDPreviewMesh(volume, voxels, basinEdges, basinCount, maxDist);
@@ -257,7 +149,7 @@ namespace HyperNav.Editor {
             TriangulateBasins(voxelCounts, basins, out MultiRegionMeshInfo meshInfo, volume);
             LogStopwatch("Triangulate regions (marching cubes)");
 
-            if (volume.VisualizationMode == HyperNavVisualizationMode.BasinTriangulation) {
+            if (volume.VisualizationMode == NavVolumeVisualizationMode.BasinTriangulation) {
                 stopwatch.Restart();
                 BuildTriangulationPreviewMesh(volume, meshInfo.Vertices, meshInfo.RegionTriangleLists);
                 LogStopwatch("Build triangulated preview mesh");
@@ -270,16 +162,231 @@ namespace HyperNav.Editor {
             }
             LogStopwatch("Decimate regions");
 
-            stopwatch.Restart();
-            if (volume.VisualizationMode == HyperNavVisualizationMode.Decimation) {
+            if (volume.VisualizationMode == NavVolumeVisualizationMode.Decimation) {
+                stopwatch.Restart();
                 BuildTriangulationPreviewMesh(volume, meshInfo.Vertices, meshInfo.RegionTriangleLists);
+                LogStopwatch("Build decimated preview mesh");
             }
-            LogStopwatch("Build decimated preview mesh");
+            
+            stopwatch.Restart();
+            PopulateData(meshInfo, volume);
+            LogStopwatch("Update serialized data");
+
+            if (volume.VisualizationMode == NavVolumeVisualizationMode.Final) {
+                volume.EditorOnlyPreviewMesh = null;
+            }
+
+            volume.InitializeData();
             
             Debug.Log($"Time taken to bake volume:{Environment.NewLine}{sb}");
         }
 
-        private static void DecimateRegions(MultiRegionMeshInfo meshInfo, HyperNavVolume volume) {
+        private static void PopulateData(MultiRegionMeshInfo meshInfo, NavVolume volume) {
+            List<List<int>> triLists = new List<List<int>>();
+            List<Vector3> vertices = new List<Vector3>();
+            Dictionary<Vector3, int> vertexIndices = new Dictionary<Vector3, int>();
+            
+            int regionCount = meshInfo.RegionTriangleLists.Count;
+
+            // Go through all vertices and rebuild index lists.
+            // This ensures that any vertices that are no longer used are not included in the data.
+            for (int i = 0; i < regionCount; i++) {
+                List<int> newTriList = new List<int>();
+                triLists.Add(newTriList);
+                List<int> oldTriList = meshInfo.RegionTriangleLists[i];
+                for (int j = 0; j < oldTriList.Count; j++) {
+                    Vector3 vertex = meshInfo.Vertices[oldTriList[j]];
+                    if (!vertexIndices.TryGetValue(vertex, out int vertexIndex)) {
+                        vertexIndex = vertices.Count;
+                        vertices.Add(vertex);
+                        vertexIndices[vertex] = vertexIndex;
+                    }
+                    
+                    newTriList.Add(vertexIndex);
+                }
+            }
+
+            NavRegionData[] regions = new NavRegionData[regionCount];
+
+            Dictionary<int, HashSet<int>> vertexRegionMembership = new Dictionary<int, HashSet<int>>();
+            Dictionary<Edge, HashSet<int>> edgeRegionMembership = new Dictionary<Edge, HashSet<int>>();
+            Dictionary<Triangle, HashSet<int>> triangleRegionMembership =
+                new Dictionary<Triangle, HashSet<int>>();
+
+            void AddFeatureToRegion<T>(in T feature, int region, Dictionary<T, HashSet<int>> dict) {
+                if (!dict.TryGetValue(feature, out HashSet<int> regionSet)) {
+                    regionSet = new HashSet<int>();
+                    dict[feature] = regionSet;
+                }
+
+                regionSet.Add(region);
+            }
+
+            for (int i = 0; i < regionCount; i++) {
+                List<int> regionIndices = triLists[i];
+                int triCount = regionIndices.Count / 3;
+                for (int triIndex = 0; triIndex < triCount; triIndex++) {
+                    int triStart = triIndex * 3;
+
+                    int v1 = regionIndices[triStart + 0];
+                    int v2 = regionIndices[triStart + 1];
+                    int v3 = regionIndices[triStart + 2];
+
+                    Edge e1 = new Edge(v1, v2);
+                    Edge e2 = new Edge(v2, v3);
+                    Edge e3 = new Edge(v3, v1);
+
+                    Triangle tri = new Triangle(v1, v2, v3);
+
+                    AddFeatureToRegion(v1, i, vertexRegionMembership);
+                    AddFeatureToRegion(v2, i, vertexRegionMembership);
+                    AddFeatureToRegion(v3, i, vertexRegionMembership);
+                    
+                    AddFeatureToRegion(e1, i, edgeRegionMembership);
+                    AddFeatureToRegion(e2, i, edgeRegionMembership);
+                    AddFeatureToRegion(e3, i, edgeRegionMembership);
+                    
+                    AddFeatureToRegion(tri, i, triangleRegionMembership);
+                }
+            }
+
+            Bounds[] regionBounds = new Bounds[regionCount];
+            for (int regionIndex = 0; regionIndex < regionCount; regionIndex++) {
+                List<int> regionIndices = triLists[regionIndex];
+                
+                bool hasSetBounds = false;
+                
+                for (int i = 0; i < regionIndices.Count; i++) {
+                    Vector3 pos = vertices[regionIndices[i]];
+                    if (hasSetBounds) {
+                        regionBounds[regionIndex].Encapsulate(pos);
+                    } else {
+                        regionBounds[regionIndex] = new Bounds(pos, Vector3.zero);
+                        hasSetBounds = true;
+                    }
+                }
+            }
+
+            for (int regionIndex = 0; regionIndex < regionCount; regionIndex++) {
+                var sharedFeatures =
+                    new Dictionary<int, (List<int> sharedVertices, List<Edge> sharedEdges, List<Triangle>
+                        sharedTriangles)>();
+                List<NavRegionBoundPlane> boundPlanes = new List<NavRegionBoundPlane>();
+
+                void AddVertexSharedRegions(int vertex) {
+                    foreach (int otherRegion in vertexRegionMembership[vertex]) {
+                        if (otherRegion == regionIndex) continue;
+
+                        sharedFeatures.TryGetValue(otherRegion, out var features);
+                        if (features.sharedVertices == null) {
+                            features.sharedVertices = new List<int>();
+                            sharedFeatures[otherRegion] = features;
+                        }
+
+                        if (!features.sharedVertices.Contains(vertex)) {
+                            features.sharedVertices.Add(vertex);
+                        }
+                    }
+                }
+
+                void AddEdgeSharedRegions(Edge edge) {
+                    foreach (int otherRegion in edgeRegionMembership[edge]) {
+                        if (otherRegion == regionIndex) continue;
+
+                        sharedFeatures.TryGetValue(otherRegion, out var features);
+                        if (features.sharedEdges == null) {
+                            features.sharedEdges = new List<Edge>();
+                            sharedFeatures[otherRegion] = features;
+                        }
+
+                        if (!features.sharedEdges.Contains(edge)) {
+                            features.sharedEdges.Add(edge);
+                        }
+                    }
+                }
+                
+                void AddTriangleSharedRegions(Triangle triangle) {
+                    foreach (int otherRegion in triangleRegionMembership[triangle]) {
+                        if (otherRegion == regionIndex) continue;
+
+                        sharedFeatures.TryGetValue(otherRegion, out var features);
+                        if (features.sharedTriangles == null) {
+                            features.sharedTriangles = new List<Triangle>();
+                            sharedFeatures[otherRegion] = features;
+                        }
+
+                        if (!features.sharedTriangles.Contains(triangle)) {
+                            features.sharedTriangles.Add(triangle);
+                        }
+                    }
+                }
+
+                List<int> regionIndices = triLists[regionIndex];
+
+                Vector3 center = regionBounds[regionIndex].center;
+                
+                int triCount = regionIndices.Count / 3;
+                for (int triIndex = 0; triIndex < triCount; triIndex++) {
+                    int triStart = triIndex * 3;
+
+                    int v1 = regionIndices[triStart + 0];
+                    int v2 = regionIndices[triStart + 1];
+                    int v3 = regionIndices[triStart + 2];
+
+                    Edge e1 = new Edge(v1, v2);
+                    Edge e2 = new Edge(v2, v3);
+                    Edge e3 = new Edge(v3, v1);
+
+                    Triangle tri = new Triangle(v1, v2, v3);
+                    
+                    AddVertexSharedRegions(v1);
+                    AddVertexSharedRegions(v2);
+                    AddVertexSharedRegions(v3);
+                    AddEdgeSharedRegions(e1);
+                    AddEdgeSharedRegions(e2);
+                    AddEdgeSharedRegions(e3);
+                    AddTriangleSharedRegions(tri);
+
+                    Vector3 v2Pos = vertices[v2];
+                    Vector3 normal = Vector3.Cross(vertices[v1] - v2Pos, vertices[v3] - v2Pos).normalized;
+                    Vector3 toCenter = center - v2Pos;
+
+                    if (Vector3.Dot(normal, toCenter) > 0) {
+                        normal *= -1;
+                    }
+
+                    if (!boundPlanes.Any(plane => Vector3.Dot(plane.Normal, normal) > 0.99999)) {
+                        boundPlanes.Add(NavRegionBoundPlane.Create(normal, v2));
+                    }
+                }
+
+                NavRegionConnectionData[] connections =
+                    new NavRegionConnectionData[sharedFeatures.Count];
+
+                int index = 0;
+                foreach (var pair in sharedFeatures) {
+                    connections[index++] = NavRegionConnectionData.Create(
+                        pair.Key,
+                        Vector3.Distance(center, regionBounds[pair.Key].center),
+                        pair.Value.sharedVertices?.ToArray() ?? Array.Empty<int>(),
+                        pair.Value.sharedEdges?.ToArray() ?? Array.Empty<Edge>(),
+                        pair.Value.sharedTriangles?.ToArray() ?? Array.Empty<Triangle>());
+                }
+                
+                Array.Sort(connections, (data1, data2) => data1.ConnectedRegionID - data2.ConnectedRegionID);
+
+                regions[regionIndex] =
+                    NavRegionData.Create(regionIndex, triLists[regionIndex].ToArray(), regionBounds[regionIndex],
+                                                    connections, boundPlanes.ToArray());
+            }
+            
+            Undo.RecordObject(volume.Data, "Bake HyperNav Data");
+            volume.Data.Populate(vertices.ToArray(), regions);
+            EditorUtility.SetDirty(volume.Data);
+            AssetDatabase.SaveAssets();
+        }
+
+        private static void DecimateRegions(MultiRegionMeshInfo meshInfo, NavVolume volume) {
             for (int i = 0; i < meshInfo.Vertices.Count; i++) {
                 int sharpEdgeCount = 0;
                 List<int> connections = meshInfo.VertexConnections[i];
@@ -409,10 +516,6 @@ namespace HyperNav.Editor {
                     GetCurrentAndNeighboringVertexIndices(vertexOrder, j, out int curVertexIndex,
                                                           out int prevVertexIndex, out int nextVertexIndex);
 
-                    if (curVertexIndex == 1499 && vertexIndex == 1477) {
-                        int asdf = 0;
-                    }
-                    
                     float dot = GetDotAndCrossProduct(meshInfo, curVertexIndex, prevVertexIndex, nextVertexIndex, out Vector3 cross);
                     if (dot < -0.99999) {
                         flatVertices.Add(curVertexIndex);
@@ -432,10 +535,6 @@ namespace HyperNav.Editor {
                     GetCurrentAndNeighboringVertexIndices(vertexOrder, j, out int curVertexIndex,
                                                           out int prevVertexIndex, out int nextVertexIndex);
 
-                    if (curVertexIndex == 1493 && vertexIndex == 1477) {
-                        int asdf = 0;
-                    }
-                    
                     Vector3 vCur = meshInfo.Vertices[curVertexIndex];
                     Vector3 vNext = meshInfo.Vertices[nextVertexIndex];
                     Vector3 vPrev = meshInfo.Vertices[prevVertexIndex];
@@ -456,9 +555,9 @@ namespace HyperNav.Editor {
                             if (concaveVertexIndex == prevVertexIndex || concaveVertexIndex == nextVertexIndex) continue;
                             Vector3 concaveVertex = meshInfo.Vertices[concaveVertexIndex];
 
-                            if (IsPointInsideBound(vNext, vPrev, normal, concaveVertex) &&
-                                IsPointInsideBound(vPrev, vCur, normal, concaveVertex) &&
-                                IsPointInsideBound(vCur, vNext, normal, concaveVertex)) {
+                            if (MathUtil.IsPointInsideBound(vNext, vPrev, normal, concaveVertex) &&
+                                MathUtil.IsPointInsideBound(vPrev, vCur, normal, concaveVertex) &&
+                                MathUtil.IsPointInsideBound(vCur, vNext, normal, concaveVertex)) {
                                 anyInside = true;
                                 break;
                             }
@@ -509,15 +608,6 @@ namespace HyperNav.Editor {
             }
 
             return true;
-        }
-
-        private static bool IsPointInsideBound(Vector3 v1, Vector3 v2, Vector3 normal, Vector3 point) {
-            Vector3 edge = v2 - v1;
-            Vector3 cross = Vector3.Cross(normal, edge).normalized;
-            Vector3 pointOffset = (point - v1).normalized;
-
-            float dot = Vector3.Dot(pointOffset, cross);
-            return dot > -.00001f;
         }
 
         private static List<int> RemoveTrianglesAndGetEdgeRing(Transform transform, MultiRegionMeshInfo meshInfo,
@@ -657,7 +747,7 @@ namespace HyperNav.Editor {
             return false;
         }
 
-        private static void TriangulateBasins(Vector3Int voxelCounts, int[,,] basins, out MultiRegionMeshInfo mesh, HyperNavVolume volume) {
+        private static void TriangulateBasins(Vector3Int voxelCounts, int[,,] basins, out MultiRegionMeshInfo mesh, NavVolume volume) {
             mesh = MultiRegionMeshInfo.CreateEmptyInfo();
             Dictionary<Vector3, int> vertexIndices = new Dictionary<Vector3, int>();
 
@@ -770,7 +860,7 @@ namespace HyperNav.Editor {
             return (Vector3) (vertex1 + vertex2) / 2.0f;
         }
 
-        private static int AddVertex(MultiRegionMeshInfo mesh, Vector3 vertex, HyperNavVolume volume,
+        private static int AddVertex(MultiRegionMeshInfo mesh, Vector3 vertex, NavVolume volume,
                                      Dictionary<Vector3, int> vertexIndices) {
             if (!vertexIndices.TryGetValue(vertex, out int vertexIndex)) {
                 vertexIndex = mesh.Vertices.Count;
@@ -850,7 +940,7 @@ namespace HyperNav.Editor {
         }
 
         private static void CombineRegionsWherePossible(Vector3Int voxelCounts, int[,,] basins, ref int regionCount,
-                                                        HyperNavVolume volume) {
+                                                        NavVolume volume) {
 
             bool combinedAnyRegion;
             HashSet<int> goneRegions = new HashSet<int>();
@@ -881,8 +971,42 @@ namespace HyperNav.Editor {
                 }
                 
             } while (combinedAnyRegion);
-            
-            Debug.Log($"Reduced region count by {goneRegions.Count}");
+
+            int newRegionCount = regionCount - goneRegions.Count;
+
+            // Shift all region indices down by number of lower regions that were removed.
+            Dictionary<int, int> regionMap = new Dictionary<int, int>();
+            Dictionary<int, int> counts = new Dictionary<int, int>();
+            for (int x = 0; x < voxelCounts.x; x++) {
+                for (int y = 0; y < voxelCounts.y; y++) {
+                    for (int z = 0; z < voxelCounts.z; z++) {
+                        int region = basins[x, y, z];
+                        if (region < 0) continue;
+                        if (goneRegions.Contains(region)) {
+                            Debug.LogError($"Found voxel in region {region} which is supposed to be gone");
+                        }
+                        if (!regionMap.TryGetValue(region, out int newRegion)) {
+                            newRegion = region - goneRegions.Count(r => r < region);
+
+                            if (newRegion >= newRegionCount) {
+                                Debug.LogError($"Region {newRegion} greater than region count");
+                            }
+
+                            regionMap[region] = newRegion;
+                        }
+
+                        counts.TryGetValue(newRegion, out int count);
+                        count++;
+                        counts[newRegion] = count;
+
+                        basins[x, y, z] = newRegion;
+                    }
+                }
+            }
+
+            Debug.Log($"Reduced region count by {goneRegions.Count}, from {regionCount} to {newRegionCount}.");
+
+            regionCount = newRegionCount;
         }
 
         private static void CombineRegions(Vector3Int voxelCounts, int[,,] basins, int region1, int region2) {
@@ -973,7 +1097,7 @@ namespace HyperNav.Editor {
             return adjacent;
         }
 
-        private static void ConvexifyAllRegions(Vector3Int voxelCounts, int[,,] basins, ref int regionCount, HyperNavVolume volume) {
+        private static void ConvexifyAllRegions(Vector3Int voxelCounts, int[,,] basins, ref int regionCount, NavVolume volume) {
             for (int i = 0; i < regionCount; i++) {
                 ConvexifyRegion(voxelCounts, basins, i, ref regionCount, volume);
                 if (regionCount > 200) {
@@ -983,7 +1107,7 @@ namespace HyperNav.Editor {
             }
         }
 
-        private static void ConvexifyRegion(Vector3Int voxelCounts, int[,,] basins, int basinId, ref int regionCount, HyperNavVolume volume) {
+        private static void ConvexifyRegion(Vector3Int voxelCounts, int[,,] basins, int basinId, ref int regionCount, NavVolume volume) {
             // Look for cubes with internal concavities and split at those points.
             for (int x = 0; x < voxelCounts.x - 1; x++) {
                 for (int y = 0; y < voxelCounts.y - 1; y++) {
@@ -1037,7 +1161,7 @@ namespace HyperNav.Editor {
         }
 
         private static void SplitRegionForNeighborConcavity(Vector3Int voxelCounts, int[,,] basins, int basinId, ref int regionCount, 
-                                                            HyperNavVolume volume, Vector3Int pos, int dirIndex) {
+                                                            NavVolume volume, Vector3Int pos, int dirIndex) {
             
             Vector3 debugPos = volume.transform.TransformPoint(volume.Bounds.min + (Vector3) pos * volume.VoxelSize);
             //Util.DrawDebugBounds(new Bounds(debugPos + Vector3.one, Vector3.one), Color.blue, 10);
@@ -1074,7 +1198,7 @@ namespace HyperNav.Editor {
         }
 
         private static void SplitRegionForInternalConcavity(Vector3Int voxelCounts, int[,,] basins, int basinId, ref int regionCount,
-                                               HyperNavVolume volume, Vector3Int pos) {
+                                               NavVolume volume, Vector3Int pos) {
             Vector3 debugPos = volume.transform.TransformPoint(volume.Bounds.min + (Vector3) pos * volume.VoxelSize);
             //Util.DrawDebugBounds(new Bounds(debugPos + Vector3.one, Vector3.one), Color.blue, 10);
             int cube = GetMarchingCubesIndex(voxelCounts, basins, basinId, pos);
@@ -1147,7 +1271,7 @@ namespace HyperNav.Editor {
         private static void SplitRegion(int[,,] basins, int basinId, int startZ,
                                         Vector3Int xAxis, Vector3Int yAxis, Vector3Int zAxis,
                                         Vector3Int axisLimits, ref int regionCount,
-                                        HyperNavVolume volume, Vector3Int startPos) {
+                                        NavVolume volume, Vector3Int startPos) {
 
             Vector3Int voxelCounts = new Vector3Int(
                 basins.GetLength(0), 
@@ -1414,7 +1538,7 @@ namespace HyperNav.Editor {
             }
         }
 
-        private static void CalculateBlockedVoxels(HyperNavVolume volume, Vector3Int voxelCounts, int[,,] voxels) {
+        private static void CalculateBlockedVoxels(NavVolume volume, Vector3Int voxelCounts, int[,,] voxels) {
             for (int x = 0; x < voxelCounts.x; x++) {
                 for (int y = 0; y < voxelCounts.y; y++) {
                     for (int z = 0; z < voxelCounts.z; z++) {
@@ -1433,16 +1557,16 @@ namespace HyperNav.Editor {
             }
         }
 
-        private static void BuildTriangulationPreviewMesh(HyperNavVolume volume, List<Vector3> vertices,
-                                                          List<List<int>> triLists) {
+        public static void BuildTriangulationPreviewMesh(NavVolume volume, IReadOnlyList<Vector3> vertices,
+                                                         IReadOnlyList<IReadOnlyList<int>> triLists) {
             Mesh mesh = new Mesh();
             
             mesh.indexFormat = IndexFormat.UInt32;
             mesh.subMeshCount = triLists.Count * 2;
-            mesh.SetVertices(vertices);
+            mesh.SetVertices(vertices as List<Vector3> ?? vertices.ToList());
             for (int i = 0; i < triLists.Count; i++) {
-                List<int> triList = triLists[i];
-                mesh.SetIndices(triList, MeshTopology.Triangles, i);
+                IReadOnlyList<int> triList = triLists[i];
+                mesh.SetIndices(triList as List<int> ?? triList.ToList(), MeshTopology.Triangles, i);
 
                 List<int> lineIndices = new List<int>();
                 int triCount = triList.Count / 3;
@@ -1473,7 +1597,7 @@ namespace HyperNav.Editor {
                           .ToArray();
         }
 
-        private static void BuildBasinIDPreviewMesh(HyperNavVolume volume, int[,,] voxels, int[,,] basins, int basinCount, float maxDist) {
+        private static void BuildBasinIDPreviewMesh(NavVolume volume, int[,,] voxels, int[,,] basins, int basinCount, float maxDist) {
             Mesh mesh = new Mesh();
 
             int sizeX = basins.GetLength(0);
@@ -1540,7 +1664,7 @@ namespace HyperNav.Editor {
             volume.EditorOnlyPreviewMaterials = Enumerable.Repeat(_basinIDPreviewMaterial, basinCount).ToArray();
         }
 
-        private static void BuildVoxelDistancePreviewMesh(HyperNavVolume volume, int[,,] voxels, float maxDist) {
+        private static void BuildVoxelDistancePreviewMesh(NavVolume volume, int[,,] voxels, float maxDist) {
             Mesh mesh = new Mesh();
 
             int sizeX = voxels.GetLength(0);
@@ -1582,7 +1706,7 @@ namespace HyperNav.Editor {
             volume.EditorOnlyPreviewMaterials = new[] { _voxelDistancePreviewMaterial };
         }
 
-        private static void BuildVoxelPreviewMesh(HyperNavVolume volume, int[,,] voxels) {
+        private static void BuildVoxelPreviewMesh(NavVolume volume, int[,,] voxels) {
             Mesh mesh = new Mesh();
 
             int sizeX = voxels.GetLength(0);
