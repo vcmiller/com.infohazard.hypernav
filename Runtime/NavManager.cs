@@ -6,6 +6,7 @@ using HyperNav.Runtime.Utility;
 using UnityEngine;
 using UnityEngine.AI;
 using UnityEngine.Pool;
+using Debug = UnityEngine.Debug;
 
 namespace HyperNav.Runtime {
     public class NavManager : MonoBehaviour {
@@ -27,7 +28,6 @@ namespace HyperNav.Runtime {
                 path.Frontier.Clear();
                 path.NodeTable.Clear();
                 path.Receiver = null;
-                path.CostFunction = null;
             });
 
         private ObjectPool<NavPath> _pathPool = new ObjectPool<NavPath>(
@@ -82,19 +82,23 @@ namespace HyperNav.Runtime {
         #region Internal Methods
 
         private void InitializePath(PendingPath path) {
-            RegionInfo start = new RegionInfo {
-                Region = path.StartHit.Region,
-                Volume = path.StartHit.Volume,
+            PathNode start = new PathNode {
+                Position = path.StartHit.Position,
+                FromRegion = -1,
+                ToRegion = path.StartHit.Region,
+                FromVolume = null,
+                ToVolume = path.StartHit.Volume,
+                Connection = null,
             };
             
             float heuristic = GetHeuristic(path, start);
             path.Frontier.Add(start, -heuristic);
             path.NodeTable[start] = new VisitedNodeInfo {
-                Cost = 0,
+                CumulativeCost = 0,
                 Heuristic = heuristic,
-                From = null,
-                FromConnection = null,
+                Previous = null,
                 Visited = false,
+                Position = start.Position,
             };
         }
 
@@ -105,9 +109,9 @@ namespace HyperNav.Runtime {
                     return;
                 }
             
-                RegionInfo node = path.Frontier.Remove();
-                if (node.Region == path.EndHit.Region && node.Volume == path.EndHit.Volume) {
-                    CompletePath(path);
+                PathNode node = path.Frontier.Remove();
+                if (node.ToRegion == path.EndHit.Region && node.ToVolume == path.EndHit.Volume) {
+                    CompletePath(path, node);
                     return;
                 }
             
@@ -121,7 +125,7 @@ namespace HyperNav.Runtime {
             _needsToClear = true;
         }
 
-        private void CompletePath(PendingPath path) {
+        private void CompletePath(PendingPath path, PathNode lastNode) {
             NavPath finishedPath = _pathPool.Get();
 
             // Initialize finishedPath properties.
@@ -131,29 +135,24 @@ namespace HyperNav.Runtime {
             finishedPath.EndPos = path.EndPos;
             finishedPath.ID = path.ID;
             finishedPath.HasBeenDisposed = false;
-            
-            RegionInfo? current = new RegionInfo {
-                Region = path.EndHit.Region,
-                Volume = path.EndHit.Volume,
-            };
+
+            PathNode? current = lastNode;
             
             // Add all points along the path to the list, in reverse order.
             finishedPath.InternalWaypoints.Add(path.EndHit.Position);
-            RegionInfo? next = null;
-            while (current.HasValue &&
-                   path.NodeTable.TryGetValue(current.Value, out VisitedNodeInfo curInfo) &&
-                   curInfo.From.HasValue) {
-                RegionInfo cur = current.Value;
-                RegionInfo prev = curInfo.From.Value;
+            while (current.HasValue && current.Value.Connection != null) {
+                PathNode cur = current.Value;
 
-                Vector3 prevPoint = path.NodeTable[prev].From?.RegionCenter ?? path.StartHit.Position;
-                Vector3 nextPoint = next?.RegionCenter ?? path.EndHit.Position;
-                INavConnection connection = curInfo.FromConnection;
+                Vector3 entryPoint = path.NodeTable[cur].Position;
+                if (cur.Connection.HasDifferentExitPoint) {
+                    finishedPath.InternalWaypoints.Add(
+                        cur.Connection.GetExitPoint(
+                            finishedPath.InternalWaypoints[finishedPath.InternalWaypoints.Count - 1]));
+                }
                 
-                connection.GetWaypoints(prevPoint, nextPoint, finishedPath.InternalWaypoints);
+                finishedPath.InternalWaypoints.Add(entryPoint);
 
-                next = current;
-                current = path.NodeTable[cur].From;
+                current = path.NodeTable[cur].Previous;
             }
             
             finishedPath.InternalWaypoints.Add(path.StartHit.Position);
@@ -170,49 +169,57 @@ namespace HyperNav.Runtime {
             _needsToClear = true;
         }
         
-        private void Visit(PendingPath path, RegionInfo node) {
+        private void Visit(PendingPath path, PathNode node) {
             VisitedNodeInfo info = path.NodeTable[node];
             info.Visited = true;
             path.NodeTable[node] = info;
 
-            NavRegionData region = node.RegionData;
+            NavRegionData toRegion = node.ToRegionData;
+            Debug.Log(node.Position);
 
-            int connectionCount = region.ConnectionCount;
+            int connectionCount = toRegion.ConnectionCount;
             for (int i = 0; i < connectionCount; i++) {
-                INavConnection connection = region.GetConnection(i);
+                INavConnection connection = toRegion.GetConnection(i);
+                if (connection.ConnectedVolume == node.FromVolume && connection.ConnectedRegionID == node.FromRegion) {
+                    continue;
+                }
 
-                float linkCost = path.CostFunction?.Invoke(connection) ?? connection.Cost;
-                float cumulativeCost = path.NodeTable[node].Cost + linkCost;
+                Vector3 nextPosition = connection.GetEntryPoint(node.Position);
+                float linkCost = Vector3.Distance(node.Position, nextPosition);
+                float cumulativeCost = info.CumulativeCost + linkCost;
 
-                RegionInfo to = new RegionInfo {
-                    Region = connection.ConnectedRegionID,
-                    Volume = connection.ConnectedVolume,
+                PathNode to = new PathNode {
+                    FromRegion = node.ToRegion,
+                    ToRegion = connection.ConnectedRegionID,
+                    FromVolume = node.ToVolume,
+                    ToVolume = connection.ConnectedVolume,
+                    Position = nextPosition,
+                    Connection = connection,
                 };
                 
                 if (path.NodeTable.TryGetValue(to, out VisitedNodeInfo toInfo)) {
-                    if (!toInfo.Visited && cumulativeCost < toInfo.Cost) {
-                        toInfo.Cost = cumulativeCost;
+                    if (!toInfo.Visited && cumulativeCost < toInfo.CumulativeCost) {
+                        toInfo.CumulativeCost = cumulativeCost;
                         path.NodeTable[to] = toInfo;
-                        path.Frontier.Update(to, -(toInfo.Heuristic + cumulativeCost));
+                        path.Frontier.Update(to, -(toInfo.Heuristic + cumulativeCost), true, to);
                     }
                 } else {
                     float heuristic = GetHeuristic(path, to);
                     
                     path.NodeTable[to] = new VisitedNodeInfo {
-                        From = node,
-                        FromConnection = connection,
-                        Cost = cumulativeCost,
+                        Previous = node,
+                        CumulativeCost = cumulativeCost,
                         Heuristic = heuristic,
                         Visited = false,
+                        Position = to.Position,
                     };
                     path.Frontier.Add(to, -(heuristic + cumulativeCost));
                 }
             }
         }
 
-        private float GetHeuristic(PendingPath path, RegionInfo node) {
-            Vector3 regionCenter = node.Volume.transform.TransformPoint(node.RegionData.Bounds.center);
-            float heuristic = Vector3.Distance(regionCenter, path.EndHit.Position);
+        private float GetHeuristic(PendingPath path, PathNode node) {
+            float heuristic = Vector3.Distance(node.Position, path.EndHit.Position);
             return heuristic;
         }
 
@@ -224,13 +231,12 @@ namespace HyperNav.Runtime {
 
         #region Public Methods
         
-        public long FindPath(Vector3 start, Vector3 end, HyperNavPathCallback receiver, float sampleRadius = 0,
-                             HyperNavCostFunction costFunc = null) {
+        public long FindPath(Vector3 start, Vector3 end, HyperNavPathCallback receiver, float sampleRadius = 0) {
             
             foreach (var volume in NavVolume.Volumes) {
                 if (volume.SamplePosition(start, out NavHit startHit, sampleRadius) &&
                     volume.SamplePosition(end, out NavHit endHit, sampleRadius)) {
-                    return FindPath(startHit, endHit, start, end, receiver, costFunc);
+                    return FindPath(startHit, endHit, start, end, receiver);
                 }
             }
 
@@ -238,7 +244,7 @@ namespace HyperNav.Runtime {
         }
 
         public long FindPath(NavHit startHit, NavHit endHit, Vector3 startPos, Vector3 endPos,
-                             HyperNavPathCallback receiver, HyperNavCostFunction costFunc = null) {
+                             HyperNavPathCallback receiver) {
             
             long id = _currentPathID++;
 
@@ -249,7 +255,6 @@ namespace HyperNav.Runtime {
             pendingPath.StartPos = startPos;
             pendingPath.EndPos = endPos;
             pendingPath.Receiver = receiver;
-            pendingPath.CostFunction = costFunc;
             
             _pendingPaths.Add(pendingPath);
             InitializePath(pendingPath);
@@ -275,46 +280,52 @@ namespace HyperNav.Runtime {
 
         #region Internal Data Types
         
-        private struct RegionInfo : IEquatable<RegionInfo> {
-            public int Region;
-            public NavVolume Volume;
+        private struct PathNode : IEquatable<PathNode> {
+            public int FromRegion;
+            public int ToRegion;
+            public NavVolume FromVolume;
+            public NavVolume ToVolume;
+            public Vector3 Position;
+            public INavConnection Connection;
 
-            public NavRegionData RegionData => Volume.Data.Regions[Region];
-
-            public Vector3 RegionCenter => Volume.transform.TransformPoint(RegionData.Bounds.center);
+            public NavRegionData ToRegionData => ToVolume ? ToVolume.Data.Regions[ToRegion] : null;
+            public NavRegionData FromRegionData => FromVolume ? FromVolume.Data.Regions[FromRegion] : null;
             
-            public bool Equals(RegionInfo other) {
-                return Region == other.Region && Equals(Volume, other.Volume);
+            public bool Equals(PathNode other) {
+                return FromRegion == other.FromRegion &&
+                       ToRegion == other.ToRegion &&
+                       ReferenceEquals(FromVolume, other.FromVolume) &&
+                       ReferenceEquals(ToVolume, other.ToVolume) &&
+                       ReferenceEquals(Connection, other.Connection);
             }
 
             public override bool Equals(object obj) {
-                return obj is RegionInfo other && Equals(other);
+                return obj is PathNode other && Equals(other);
             }
 
             public override int GetHashCode() {
-                return HashCode.Combine(Region, Volume);
+                return HashCode.Combine(FromRegion, ToRegion, FromVolume, ToVolume, Connection);
             }
         }
 
         private struct VisitedNodeInfo {
-            public RegionInfo? From;
-            public INavConnection FromConnection;
+            public PathNode? Previous;
             public float Heuristic;
-            public float Cost;
+            public float CumulativeCost;
             public bool Visited;
+            public Vector3 Position;
         }
         
         private class PendingPath {
             public long ID = -1;
             public HyperNavPathCallback Receiver;
-            public HyperNavCostFunction CostFunction;
             public NavHit StartHit;
             public NavHit EndHit;
             public Vector3 StartPos;
             public Vector3 EndPos;
             
-            public readonly Dictionary<RegionInfo, VisitedNodeInfo> NodeTable = new Dictionary<RegionInfo, VisitedNodeInfo>();
-            public readonly Heap<RegionInfo> Frontier = new Heap<RegionInfo>();
+            public readonly Dictionary<PathNode, VisitedNodeInfo> NodeTable = new Dictionary<PathNode, VisitedNodeInfo>();
+            public readonly Heap<PathNode> Frontier = new Heap<PathNode>();
 
             public bool Finished => ID < 0;
         }
@@ -325,8 +336,6 @@ namespace HyperNav.Runtime {
     #region External Data Types
     
     public delegate void HyperNavPathCallback(long id, NavPath path);
-
-    public delegate float HyperNavCostFunction(INavConnection connection);
     
     public class NavPath : IDisposable {
         public long ID { get; internal set; } = -1;

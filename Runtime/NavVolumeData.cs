@@ -52,9 +52,10 @@ namespace HyperNav.Runtime {
     public interface INavConnection {
         NavVolume ConnectedVolume { get; }
         int ConnectedRegionID { get; }
-        float Cost { get; }
+        bool HasDifferentExitPoint { get; }
 
-        int GetWaypoints(Vector3 prevPoint, Vector3 nextPoint, IList<Vector3> waypoints);
+        Vector3 GetEntryPoint(Vector3 previous);
+        Vector3 GetExitPoint(Vector3 next);
     }
 
     [Serializable]
@@ -74,6 +75,7 @@ namespace HyperNav.Runtime {
         public IReadOnlyList<int> Vertices => _vertices;
         public IReadOnlyList<Edge> Edges => _edges;
         public IReadOnlyList<Triangle> Triangles => _triangles;
+        public bool HasDifferentExitPoint => false;
 
         public static NavRegionConnectionData Create(int connectedRegionID, float cost,
                                                     int[] vertices, Edge[] edges, Triangle[] triangles) {
@@ -86,8 +88,11 @@ namespace HyperNav.Runtime {
             };
         }
 
-        public int GetWaypoints(Vector3 prevPoint, Vector3 nextPoint, IList<Vector3> points) {
-            Vector3 localPos = Volume.transform.InverseTransformPoint(nextPoint);
+        public Vector3 GetEntryPoint(Vector3 prev) => GetNearestPoint(prev);
+        public Vector3 GetExitPoint(Vector3 next) => throw new InvalidOperationException();
+
+        public Vector3 GetNearestPoint(Vector3 reference) {
+            Vector3 localPos = Volume.transform.InverseTransformPoint(reference);
             
             Vector3 closestPoint = default;
             float closestDistance = float.PositiveInfinity;
@@ -124,9 +129,8 @@ namespace HyperNav.Runtime {
             }
 
             Vector3 closest = Volume.transform.TransformPoint(closestPoint);
-            Debug.DrawLine(closest, nextPoint, Color.red, 10);
-            points.Add(closest);
-            return 1;
+            Debug.DrawLine(closest, reference, Color.red, 10);
+            return closest;
         }
     }
     

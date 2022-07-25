@@ -14,13 +14,16 @@ namespace HyperNav.Runtime.Utility {
             BubbleUp(_items.Count - 1);
         }
 
-        public void Update(T item, float newPriority) {
+        public void Update(T item, float newPriority, bool replace = false, T replaceWith = default) {
             int i = _items.FindIndex(t => Equals(t.item, item));
             if (i < 0) throw new ArgumentException("Value not in heap.");
+            
             var val = _items[i];
             float oldPriority = val.priority;
             val.priority = newPriority;
+            if (replace) val.item = replaceWith;
             _items[i] = val;
+            
             if (newPriority > oldPriority) {
                 BubbleUp(i);
             } else if (newPriority < oldPriority) {
